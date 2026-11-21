@@ -1,30 +1,47 @@
 <?php
 
-use App\Http\Middleware\HandleAppearance;
-use App\Http\Middleware\HandleInertiaRequests;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
-use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
+        api: __DIR__.'/../routes/api.php',
+        apiPrefix: '',
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
-
-        $middleware->web(append: [
-            HandleAppearance::class,
-            HandleInertiaRequests::class,
-            AddLinkHeadersForPreloadedAssets::class,
-        ]);
+        //
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        $exceptions->shouldRenderJsonWhen(
-            fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
-        );
+        // Forzar respuestas JSON en la API
+        $exceptions->shouldRenderJsonWhen(function (Request $request, Throwable $e) {
+            return $request->is('api/*') || $request->is('v1/*') || $request->expectsJson();
+        });
+
+        // Manejo personalizado de errores 404 (Ruta no encontrada)
+        $exceptions->render(function (NotFoundHttpException $e, Request $request) {
+            if ($request->is('v1/*')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'El recurso solicitado no existe.',
+                ], 404);
+            }
+        });
+
+        // Manejo personalizado de errores de validación (422)
+        $exceptions->render(function (ValidationException $e, Request $request) {
+            if ($request->is('v1/*')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Error de validación en los datos enviados.',
+                    'errors' => $e->errors(),
+                ], 422);
+            }
+        });
     })->create();
